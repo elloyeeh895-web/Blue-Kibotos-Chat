@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>제작자 치트 패널</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0f1722;color:#e6edf6;max-width:560px;margin:0 auto;padding:18px}
+h1{font-size:18px;margin:0 0 6px}
+input,button{font-size:15px;padding:10px;border-radius:8px;border:1px solid #2c3b52;background:#16212f;color:#e6edf6;box-sizing:border-box}
+button{border:0;cursor:pointer;font-weight:700}
+.full{width:100%;margin-top:8px}
+.item{display:flex;gap:6px;margin-top:8px}
+.item input{flex:1;min-width:0}
+.run{background:#2563eb;color:#fff}.del{background:#3b2230;color:#fca5a5;padding:10px 12px}
+.add{background:#1e2b3d;color:#cfe0f5;width:100%;margin-top:10px}
+details{background:#131d2b;border:1px solid #243349;border-radius:10px;padding:10px 12px;margin-top:10px}
+summary{cursor:pointer;font-weight:700;font-size:14px}
+#log{margin-top:14px;font-size:13px;line-height:1.6;white-space:pre-wrap}
+.ok{color:#4ade80}.err{color:#f87171}.mut{color:#8a9bb0;font-size:12px;line-height:1.7}
+ol{padding-left:18px;font-size:13px;line-height:1.8;margin:8px 0}
+code{background:#0b121c;padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<h1>🛠 제작자 치트 패널</h1>
+<div class="mut">이 파일은 제작자만 가지고 있으세요. 플레이어에게는 게임 파일만 배포합니다.</div>
+
+<details id="cfg">
+  <summary>① 연결 설정 (처음 한 번)</summary>
+  <input id="repo" class="full" placeholder="저장소  예) 사용자이름/저장소이름 (게임 주소를 넣어도 돼요)" autocomplete="off">
+  <input id="token" class="full" type="password" placeholder="GitHub 토큰 (github_pat_ 로 시작)" autocomplete="off">
+  <div class="mut" style="margin-top:6px">저장소 이름과 토큰은 <b>이 폰/브라우저에만</b> 저장돼요. 다른 사람에게 이 파일이나 토큰을 보여주지 마세요.</div>
+</details>
+
+<details>
+  <summary>처음 설정 방법 (GitHub)</summary>
+  <ol>
+    <li>게임이 올라가 있는 GitHub 저장소 이름 확인.<br>
+        게임 주소가 <code>https://AAA.github.io/BBB/</code> 이면 저장소는 <b>AAA/BBB</b> 예요.<br>
+        (저장소는 <b>Public</b> 이어야 해요. GitHub Pages 무료 사용 중이면 이미 Public)</li>
+    <li>github.com 로그인 → 오른쪽 위 프로필 → <b>Settings</b> → 맨 아래 <b>Developer settings</b> → <b>Personal access tokens → Fine-grained tokens → Generate new token</b></li>
+    <li>이름은 아무거나, 기간(Expiration)은 원하는 만큼</li>
+    <li><b>Repository access → Only select repositories</b> → 위 저장소 하나만 선택</li>
+    <li><b>Permissions → Repository permissions → Contents</b> 를 <b>Read and write</b> 로 변경</li>
+    <li><b>Generate token</b> → 나온 <code>github_pat_...</code> 를 복사 (한 번만 보여줘요)</li>
+    <li>위 ① 에 저장소 이름과 토큰 입력 → 아래 ▶ 로 명령 실행</li>
+    <li>게임 파일의 <code>CREATOR_GH_REPO</code> 에도 같은 <b>사용자/저장소</b> 를 넣고, 수정한 게임 파일을 GitHub에 다시 올리기</li>
+  </ol>
+  <div class="mut">명령은 저장소의 <code>cheat.json</code> 파일에 기록돼요 (처음 보낼 때 자동 생성). 게임은 이 파일을 20초마다 확인하므로 <b>전달까지 최대 1분 정도</b> 걸릴 수 있어요.</div>
+</details>
+
+<div class="mut" style="margin-top:14px">② 명령어를 직접 고치거나 추가하세요. ▶ 를 누르면 지금 접속 중인 모두에게 적용됩니다.<br>
+재화: every.크레딧 / 청휘석 / 티켓 / 선물 / 엘리그마 : 숫자 &nbsp;·&nbsp; 메시지: every.m:하고싶은말</div>
+<div id="list"></div>
+<button class="add" id="add">＋ 명령어 추가</button>
+<div id="log"></div>
+
+<script>
+var $ = function (id) { return document.getElementById(id); };
+var GH_API = 'https://api.github.com';
+var FILE_PATH = 'cheat.json';
+var MAX_AMOUNT = 99999999, MAX_MSG = 200, KEEP = 20;
+var CURRENCIES = {
+  '크레딧': 'credits', 'credit': 'credits', 'credits': 'credits',
+  '청휘석': 'pyroxene', 'pyroxene': 'pyroxene',
+  '티켓': 'tickets', '인연티켓': 'tickets', 'ticket': 'tickets', 'tickets': 'tickets',
+  '선물': 'gifts', '인연선물': 'gifts', 'gift': 'gifts', 'gifts': 'gifts',
+  '엘리그마': 'eligma', 'eligma': 'eligma'
+};
+var LABELS = { credits: '크레딧', pyroxene: '청휘석', tickets: '인연 티켓', gifts: '인연 선물', eligma: '엘리그마' };
+var DEFAULTS = ['《every.크레딧:1000》', '《every.청휘석:1000》', '《every.m:안녕하세요》'];
+
+function parseCommand(raw) {
+  var s = String(raw || '').trim();
+  if (s.charAt(0) === '《' && s.charAt(s.length - 1) === '》') s = s.slice(1, -1).trim();
+  var mm = s.match(/^every\.m\s*[:：]\s*([\s\S]+)$/i);
+  if (mm) {
+    var text = mm[1].trim().replace(/\s+/g, ' ');
+    if (!text) return { error: '메시지 내용이 비어 있습니다.' };
+    if (text.length > MAX_MSG) return { error: '메시지는 ' + MAX_MSG + '자 이하여야 합니다.' };
+    return { type: 'notice', text: text };
+  }
+  var m = s.match(/^every\.\s*([^:：\s]+)\s*[:：]\s*(-?\d+)$/i);
+  if (!m) return { error: '형식 오류. 예: every.크레딧:1000 또는 every.m:안녕하세요' };
+  var currency = CURRENCIES[m[1].toLowerCase()];
+  if (!currency) return { error: '알 수 없는 명령: ' + m[1] + ' (재화: ' + Object.keys(LABELS).map(function (k) { return LABELS[k]; }).join(', ') + ' / 메시지: m)' };
+  var amount = parseInt(m[2], 10);
+  if (!isFinite(amount) || amount <= 0) return { error: '숫자는 1 이상이어야 합니다.' };
+  if (amount > MAX_AMOUNT) return { error: '최대 ' + MAX_AMOUNT + ' 까지 가능합니다.' };
+  return { type: 'grant', currency: currency, amount: amount };
+}
+
+/* ---------- GitHub (cheat.json 읽기/쓰기) ---------- */
+function normalizeRepo(s) {   // github.io 주소 / github.com 주소 / 사용자/저장소 → 사용자/저장소
+  s = String(s || '').trim();
+  var m = s.match(/^https?:\/\/([^\/.]+)\.github\.io(?:\/([^\/?#]+))?/i);
+  if (m) return m[1] + '/' + (m[2] || (m[1] + '.github.io'));
+  s = s.replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '');
+  return s.split(/[\/?#]/).filter(Boolean).slice(0, 2).join('/');
+}
+function repoName() { return normalizeRepo($('repo').value); }
+function tokenVal() { return $('token').value.trim(); }
+function cfgOk() { return /^[^\/\s]+\/[^\/\s]+$/.test(repoName()) && tokenVal(); }
+function fileUrl() { return GH_API + '/repos/' + repoName() + '/contents/' + FILE_PATH; }
+function headers() { return { 'Authorization': 'Bearer ' + tokenVal(), 'Accept': 'application/vnd.github+json' }; }
+
+function b64encode(str) {
+  var bytes = new TextEncoder().encode(str), bin = '';
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function b64decode(b64) {
+  var bin = atob(String(b64).replace(/\s/g, '')), bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+function ghError(status, body) {
+  var m = (body && body.message) ? body.message : ('HTTP ' + status);
+  if (status === 401) return '토큰이 올바르지 않거나 만료됐어요. (' + m + ')';
+  if (status === 403) return '권한이 없거나 요청이 너무 많아요. 토큰의 Contents 권한이 "Read and write"인지 확인하세요. (' + m + ')';
+  if (status === 404) return '저장소를 찾을 수 없어요. 저장소 이름과 토큰의 저장소 선택을 확인하세요. (' + m + ')';
+  if (status === 422) return '저장에 실패했어요. (' + m + ')';
+  return m;
+}
+
+function readFile() {  // 현재 cheat.json (없으면 새로 만들 준비)
+  return fetch(fileUrl() + '?t=' + Date.now(), { headers: headers(), cache: 'no-store' }).then(function (r) {
+    return r.json().catch(function () { return null; }).then(function (j) {
+      if (r.status === 404 && j && /Not Found/i.test(j.message || '')) {
+        // 저장소는 있는데 파일만 없을 수도, 저장소/권한 문제일 수도 있음 → 저장소 존재 확인
+        return fetch(GH_API + '/repos/' + repoName(), { headers: headers() }).then(function (rr) {
+          if (rr.status === 404) throw new Error(ghError(404, j));
+          return { sha: null, entries: [] };
+        });
+      }
+      if (!r.ok) throw new Error(ghError(r.status, j));
+      var entries = [];
+      try { var d = JSON.parse(b64decode(j.content)); if (d && Array.isArray(d.entries)) entries = d.entries; } catch (e) {}
+      return { sha: j.sha, entries: entries };
+    });
+  });
+}
+function writeFile(entries, sha) {
+  var body = { message: 'cheat ' + new Date().toISOString(), content: b64encode(JSON.stringify({ entries: entries })) };
+  if (sha) body.sha = sha;
+  return fetch(fileUrl(), { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers()), body: JSON.stringify(body) })
+    .then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) {
+        if (!r.ok) { var e = new Error(ghError(r.status, j)); e.status = r.status; throw e; }
+        return j;
+      });
+    });
+}
+function randId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+function send(cmd, attempt) {
+  attempt = attempt || 0;
+  var entry = { id: randId(), type: cmd.type, ts: Date.now() };
+  if (cmd.type === 'notice') entry.text = cmd.text; else { entry.currency = cmd.currency; entry.amount = cmd.amount; }
+  return readFile().then(function (cur) {
+    var list = cur.entries.concat([entry]).slice(-KEEP);
+    return writeFile(list, cur.sha);
+  }).catch(function (e) {
+    if ((e.status === 409 || e.status === 422) && attempt < 2) return send(cmd, attempt + 1);  // 동시에 저장돼서 충돌 → 재시도
+    throw e;
+  });
+}
+
+/* ---------- UI ---------- */
+function log(t, c) {
+  var d = document.createElement('div'); d.className = c;
+  d.textContent = new Date().toLocaleTimeString() + '  ' + t;
+  $('log').prepend(d);
+}
+function saveCfg() { try { localStorage.setItem('cheat_gh', JSON.stringify({ repo: $('repo').value, token: $('token').value })); } catch (e) {} }
+function loadCfg() { try { var c = JSON.parse(localStorage.getItem('cheat_gh') || 'null'); if (c) { $('repo').value = c.repo || ''; $('token').value = c.token || ''; } } catch (e) {} }
+function loadRows() {
+  try { var r = JSON.parse(localStorage.getItem('cheat_rows') || 'null'); if (Array.isArray(r) && r.length) return r; } catch (e) {}
+  return DEFAULTS.slice();
+}
+function saveRows() {
+  var v = []; document.querySelectorAll('#list input').forEach(function (i) { v.push(i.value); });
+  try { localStorage.setItem('cheat_rows', JSON.stringify(v)); } catch (e) {}
+}
+
+function run(raw) {
+  raw = raw.trim(); if (!raw) return;
+  var cmd = parseCommand(raw);
+  if (cmd.error) { log('✖ ' + cmd.error, 'err'); return; }
+  if (!cfgOk()) { $('cfg').open = true; log('✖ ① 연결 설정(저장소 이름 · 토큰)을 먼저 입력하세요.', 'err'); return; }
+  if (!confirm('접속 중인 모든 플레이어에게 적용합니다.\n\n' + raw)) return;
+  $('repo').value = repoName(); saveCfg();
+  log('… 저장소 ' + repoName() + ' 에 기록 중', 'mut');
+  send(cmd).then(function () {
+    if (cmd.type === 'notice') log('✔ 메시지 등록: "' + cmd.text + '" (최대 1분 안에 모두에게 표시)', 'ok');
+    else log('✔ ' + LABELS[cmd.currency] + ' +' + cmd.amount + ' 등록 (최대 1분 안에 접속 중인 플레이어에게 지급)', 'ok');
+  }).catch(function (e) { log('✖ ' + String((e && e.message) || e), 'err'); });
+}
+
+function addRow(val) {
+  var row = document.createElement('div'); row.className = 'item';
+  var inp = document.createElement('input'); inp.value = val; inp.autocomplete = 'off';
+  inp.addEventListener('input', saveRows);
+  inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') run(inp.value); });
+  var go = document.createElement('button'); go.className = 'run'; go.textContent = '▶'; go.onclick = function () { run(inp.value); };
+  var del = document.createElement('button'); del.className = 'del'; del.textContent = '✕';
+  del.onclick = function () { row.remove(); saveRows(); };
+  row.appendChild(inp); row.appendChild(go); row.appendChild(del);
+  $('list').appendChild(row);
+}
+
+loadCfg();
+if (!$('repo').value) $('cfg').open = true;
+loadRows().forEach(addRow);
+$('add').onclick = function () { addRow('《every.크레딧:1000》'); saveRows(); var i = document.querySelectorAll('#list input'); i[i.length - 1].focus(); };
+$('repo').addEventListener('change', function () { var n = normalizeRepo($('repo').value); if (n) $('repo').value = n; saveCfg(); });
+$('token').addEventListener('change', saveCfg);
+</script>
+</body>
+</html>
